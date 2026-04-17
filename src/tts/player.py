@@ -38,6 +38,8 @@ class AudioPlayer:
         self._is_playing = False
         self._is_paused = False
         self._duration: Optional[float] = None  # 音频时长（秒）
+        self._position_ms: int = 0  # 累计播放毫秒数
+        self._pause_position_ms: int = 0  # 暂停时的位置（毫秒）
         self._on_finished_callback: Optional[Callable[[], None]] = None
         self._on_state_changed_callback: Optional[Callable[[str], None]] = None
         self._on_state_change_enum_callback: Optional[Callable[[PlaybackState], None]] = None
@@ -87,6 +89,10 @@ class AudioPlayer:
             # 检测音频时长
             self._duration = self._detect_duration(file_path)
             
+            # 重置位置跟踪
+            self._position_ms = 0
+            self._pause_position_ms = 0
+            
             self._current_file = file_path
             self._is_playing = True
             self._is_paused = False
@@ -112,6 +118,8 @@ class AudioPlayer:
             self._is_playing = False
             self._is_paused = False
             self._duration = None
+            self._position_ms = 0
+            self._pause_position_ms = 0
             
             logger.info("音频播放已停止")
             self._notify_state_changed("stopped")
@@ -124,10 +132,12 @@ class AudioPlayer:
             是否成功暂停（如果未在播放则返回False）
         """
         if self._is_playing and not self._is_paused:
+            # 记录当前位置（pygame的get_pos()返回从播放开始到现在的毫秒数）
+            self._pause_position_ms = pygame.mixer.music.get_pos()
             pygame.mixer.music.pause()
             self._is_paused = True
             
-            logger.info("音频播放已暂停")
+            logger.info(f"音频播放已暂停，位置: {self._pause_position_ms}ms")
             self._notify_state_changed("paused")
             return True
         
@@ -141,11 +151,15 @@ class AudioPlayer:
             是否成功恢复（如果未暂停则返回False）
         """
         if self._is_paused:
+            # 累加暂停前的播放位置
+            self._position_ms += self._pause_position_ms
+            self._pause_position_ms = 0
+            
             pygame.mixer.music.unpause()
             self._is_paused = False
             self._is_playing = True
             
-            logger.info("音频播放已恢复")
+            logger.info(f"音频播放已恢复，累计位置: {self._position_ms}ms")
             self._notify_state_changed("playing")
             return True
         
@@ -222,6 +236,80 @@ class AudioPlayer:
             音频总时长（秒），如果未加载音频则返回None
         """
         return self._duration
+    
+    def get_position(self) -> Optional[float]:
+        """
+        获取当前播放位置
+        
+        Returns:
+            当前播放位置（秒），如果未加载音频则返回None
+        """
+        if not self._is_playing and not self._is_paused:
+            return None
+        
+        if self._is_paused:
+            # 暂停时返回累计位置+暂停位置
+            position_ms = self._position_ms + self._pause_position_ms
+        else:
+            # 播放时返回累计位置+当前播放位置
+            current_pos = pygame.mixer.music.get_pos()
+            if current_pos < 0:
+                current_pos = 0
+            position_ms = self._position_ms + current_pos
+        
+        return position_ms / 1000.0
+    
+    def seek(self, position_seconds: float) -> bool:
+        """
+        跳转到指定位置
+        
+        Args:
+            position_seconds: 目标位置（秒）
+            
+        Returns:
+            是否成功跳转
+        """
+        if not self._current_file:
+            logger.warning("无法跳转：未加载音频文件")
+            return False
+        
+        if position_seconds < 0:
+            position_seconds = 0
+        
+        if self._duration and position_seconds > self._duration:
+            position_seconds = self._duration
+        
+        try:
+            # 保存当前状态
+            was_paused = self._is_paused
+            
+            # 停止当前播放
+            pygame.mixer.music.stop()
+            
+            # 重新加载并从指定位置开始播放
+            pygame.mixer.music.load(self._current_file)
+            pygame.mixer.music.play(start=position_seconds)
+            
+            # 重置位置跟踪
+            self._position_ms = int(position_seconds * 1000)
+            self._pause_position_ms = 0
+            self._is_playing = True
+            self._is_paused = False
+            
+            # 如果之前是暂停状态，保持暂停
+            if was_paused:
+                pygame.mixer.music.pause()
+                self._is_paused = True
+                self._is_playing = True
+                logger.info(f"跳转到位置: {position_seconds:.2f}秒（暂停状态）")
+            else:
+                logger.info(f"跳转到位置: {position_seconds:.2f}秒")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"跳转失败: {e}")
+            return False
     
     def _detect_duration(self, file_path: str) -> Optional[float]:
         """
@@ -335,6 +423,8 @@ class AudioPlayer:
         self.stop()
         self._current_file = None
         self._duration = None
+        self._position_ms = 0
+        self._pause_position_ms = 0
         self._on_finished_callback = None
         self._on_state_changed_callback = None
         
