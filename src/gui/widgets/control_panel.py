@@ -11,6 +11,7 @@ import logging
 from ...tts.voice_manager import Voice, VoiceManager
 from ...tts.generator import TTSOptions
 from ...tts.player import PlaybackState
+from ...config.settings import VoicePreset
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,14 @@ class ControlPanel(ttk.Frame):
         self._pitch_var = tk.DoubleVar(value=1.0)
         self._volume_var = tk.DoubleVar(value=100.0)
         
+        # 预设状态
+        self._preset_var = tk.StringVar()
+        
+        # 预设回调
+        self._on_save_preset: Optional[Callable[[str], None]] = None
+        self._on_delete_preset: Optional[Callable[[str], None]] = None
+        self._on_load_preset: Optional[Callable[[str], None]] = None
+        
         # 构建UI
         self._create_widgets()
         
@@ -91,6 +100,46 @@ class ControlPanel(ttk.Frame):
         
         row = 0
         
+        # ===== 预设选择区域 =====
+        ttk.Label(self, text="语音预设", font=("Microsoft YaHei", 10)).grid(
+            row=row, column=0, sticky=tk.W, pady=(0, 5)
+        )
+        row += 1
+        
+        # 预设选择下拉框
+        self._preset_combo = ttk.Combobox(
+            self,
+            textvariable=self._preset_var,
+            state="readonly",
+            width=14
+        )
+        self._preset_combo.grid(
+            row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 5)
+        )
+        self._preset_combo.bind('<<ComboboxSelected>>', self._on_preset_selected)
+        
+        # 预设操作按钮
+        preset_btn_frame = ttk.Frame(self)
+        preset_btn_frame.grid(row=row, column=1, sticky=tk.W, padx=(5, 0), pady=(0, 5))
+        
+        self._save_preset_btn = ttk.Button(
+            preset_btn_frame, text="保存", width=5, command=self._handle_save_preset
+        )
+        self._save_preset_btn.pack(side=tk.LEFT, padx=(0, 2))
+        
+        self._delete_preset_btn = ttk.Button(
+            preset_btn_frame, text="删除", width=5, command=self._handle_delete_preset
+        )
+        self._delete_preset_btn.pack(side=tk.LEFT)
+        row += 1
+        
+        # 分隔线
+        ttk.Separator(self, orient=tk.HORIZONTAL).grid(
+            row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 10)
+        )
+        row += 1
+        
+        # ===== 语言选择区域 =====
         # 语言选择
         ttk.Label(self, text="语言", font=("Microsoft YaHei", 10)).grid(
             row=row, column=0, sticky=tk.W, pady=(0, 5)
@@ -429,3 +478,140 @@ class ControlPanel(ttk.Frame):
         state = tk.NORMAL if enabled else tk.DISABLED
         self._play_btn.config(state=state)
         self._save_btn.config(state=state)
+    
+    # ===== 预设管理方法 =====
+    
+    def set_preset_callbacks(
+        self,
+        on_save_preset: Optional[Callable[[str], None]] = None,
+        on_delete_preset: Optional[Callable[[str], None]] = None,
+        on_load_preset: Optional[Callable[[str], None]] = None
+    ) -> None:
+        """
+        设置预设操作回调
+        
+        Args:
+            on_save_preset: 保存预设回调，参数为预设名称
+            on_delete_preset: 删除预设回调，参数为预设名称
+            on_load_preset: 加载预设回调，参数为预设名称
+        """
+        self._on_save_preset = on_save_preset
+        self._on_delete_preset = on_delete_preset
+        self._on_load_preset = on_load_preset
+        logger.debug("预设回调已设置")
+    
+    def update_presets(self, preset_names: List[str]) -> None:
+        """
+        更新预设列表
+        
+        Args:
+            preset_names: 预设名称列表
+        """
+        self._preset_combo['values'] = preset_names
+        if preset_names:
+            self._preset_var.set("")  # 清空选择，不自动选择第一个
+        logger.debug(f"预设列表已更新: {len(preset_names)}个预设")
+    
+    def _on_preset_selected(self, event) -> None:
+        """预设选择变化处理"""
+        preset_name = self._preset_var.get()
+        if not preset_name:
+            return
+        
+        logger.info(f"选择预设: {preset_name}")
+        
+        if self._on_load_preset:
+            self._on_load_preset(preset_name)
+    
+    def _handle_save_preset(self) -> None:
+        """保存预设按钮点击处理"""
+        from tkinter import simpledialog
+        
+        # 显示名称输入对话框
+        preset_name = simpledialog.askstring(
+            "保存预设",
+            "请输入预设名称:",
+            parent=self
+        )
+        
+        if not preset_name:
+            return  # 用户取消
+        
+        preset_name = preset_name.strip()
+        if not preset_name:
+            self.set_status("预设名称不能为空")
+            return
+        
+        logger.info(f"保存预设: {preset_name}")
+        
+        if self._on_save_preset:
+            self._on_save_preset(preset_name)
+    
+    def _handle_delete_preset(self) -> None:
+        """删除预设按钮点击处理"""
+        preset_name = self._preset_var.get()
+        if not preset_name:
+            self.set_status("请先选择要删除的预设")
+            return
+        
+        # 确认删除
+        from tkinter import messagebox
+        if not messagebox.askyesno(
+            "确认删除",
+            f"确定要删除预设 '{preset_name}' 吗？",
+            parent=self
+        ):
+            return
+        
+        logger.info(f"删除预设: {preset_name}")
+        
+        if self._on_delete_preset:
+            self._on_delete_preset(preset_name)
+    
+    def apply_preset(self, preset: VoicePreset) -> None:
+        """
+        应用预设到控件
+        
+        Args:
+            preset: 语音预设对象
+        """
+        # 设置语言
+        if preset.language:
+            self._language_var.set(preset.language)
+            self._update_voice_list()
+        
+        # 设置语音
+        if preset.voice_display_name:
+            self._voice_var.set(preset.voice_display_name)
+            self._on_voice_selected(None)
+        
+        # 设置参数
+        self._speed_var.set(preset.speed)
+        self._pitch_var.set(preset.pitch)
+        self._volume_var.set(preset.volume)
+        
+        # 更新标签显示
+        self._speed_label.config(text=f"语速: {preset.speed:.1f}x")
+        self._pitch_label.config(text=f"音调: {preset.pitch:.1f}")
+        self._volume_label.config(text=f"音量: {int(preset.volume)}%")
+        
+        logger.info(f"已应用预设: {preset.name}")
+    
+    def get_current_preset_data(self) -> Optional[Dict[str, Any]]:
+        """
+        获取当前配置作为预设数据
+        
+        Returns:
+            包含当前语音和参数的字典，如果没有选择语音则返回None
+        """
+        if not self._current_voice:
+            return None
+        
+        return {
+            'voice_short_name': self._current_voice.short_name,
+            'voice_display_name': self._voice_var.get(),
+            'language': self._language_var.get(),
+            'speed': self._speed_var.get(),
+            'pitch': self._pitch_var.get(),
+            'volume': self._volume_var.get()
+        }

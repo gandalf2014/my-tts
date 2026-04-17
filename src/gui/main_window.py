@@ -16,7 +16,7 @@ from ..tts.voice_manager import VoiceManager
 from ..tts.generator import TTSGenerator, TTSOptions
 from ..tts.player import AudioPlayer, PlaybackState
 from ..tts.batch_processor import BatchProcessor, BatchConfig, SegmentationMode
-from ..config.settings import Settings
+from ..config.settings import Settings, VoicePreset, PresetManager
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,9 @@ class MainWindow:
         
         # 连接信号和回调
         self._connect_signals()
+        
+        # 设置预设回调
+        self._setup_preset_callbacks()
         
         # 加载语音
         self._load_voices()
@@ -212,6 +215,77 @@ class MainWindow:
         )
         
         logger.debug("信号连接完成")
+    
+    def _setup_preset_callbacks(self) -> None:
+        """设置预设回调"""
+        self._control_panel.set_preset_callbacks(
+            on_save_preset=self._handle_save_preset,
+            on_delete_preset=self._handle_delete_preset,
+            on_load_preset=self._handle_load_preset
+        )
+        
+        # 加载已有预设列表
+        self._refresh_preset_list()
+        
+        logger.debug("预设回调设置完成")
+    
+    def _refresh_preset_list(self) -> None:
+        """刷新预设列表"""
+        presets = PresetManager.list_presets(self._settings.config)
+        preset_names = [p.name for p in presets]
+        self._control_panel.update_presets(preset_names)
+        logger.debug(f"预设列表已刷新: {len(preset_names)}个")
+    
+    def _handle_save_preset(self, preset_name: str) -> None:
+        """处理保存预设"""
+        # 获取当前配置数据
+        preset_data = self._control_panel.get_current_preset_data()
+        if not preset_data:
+            messagebox.showwarning("警告", "请先选择一个语音。")
+            return
+        
+        # 创建预设对象
+        preset = VoicePreset(
+            name=preset_name,
+            voice_short_name=preset_data['voice_short_name'],
+            voice_display_name=preset_data['voice_display_name'],
+            language=preset_data['language'],
+            speed=preset_data['speed'],
+            pitch=preset_data['pitch'],
+            volume=preset_data['volume']
+        )
+        
+        # 保存预设
+        if PresetManager.save_preset(self._settings.config, preset):
+            self._settings.save()
+            self._refresh_preset_list()
+            self._control_panel.set_status(f"预设 '{preset_name}' 已保存")
+            logger.info(f"预设已保存: {preset_name}")
+        else:
+            self._control_panel.set_status("保存预设失败")
+            messagebox.showerror("错误", "保存预设失败")
+    
+    def _handle_delete_preset(self, preset_name: str) -> None:
+        """处理删除预设"""
+        if PresetManager.delete_preset(self._settings.config, preset_name):
+            self._settings.save()
+            self._refresh_preset_list()
+            self._control_panel.set_status(f"预设 '{preset_name}' 已删除")
+            logger.info(f"预设已删除: {preset_name}")
+        else:
+            self._control_panel.set_status("删除预设失败")
+            messagebox.showerror("错误", "删除预设失败")
+    
+    def _handle_load_preset(self, preset_name: str) -> None:
+        """处理加载预设"""
+        preset = PresetManager.load_preset(self._settings.config, preset_name)
+        if preset:
+            self._control_panel.apply_preset(preset)
+            self._control_panel.set_status(f"已加载预设: {preset_name}")
+            logger.info(f"预设已加载: {preset_name}")
+        else:
+            self._control_panel.set_status(f"加载预设失败: {preset_name}")
+            messagebox.showerror("错误", f"无法加载预设: {preset_name}")
     
     def _load_voices(self) -> None:
         """异步加载语音列表"""
