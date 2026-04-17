@@ -8,6 +8,7 @@ import pygame
 from typing import Optional, Callable
 from pathlib import Path
 from enum import Enum
+from mutagen.mp3 import MP3
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class AudioPlayer:
         self._current_file: Optional[str] = None
         self._is_playing = False
         self._is_paused = False
+        self._duration: Optional[float] = None  # 音频时长（秒）
         self._on_finished_callback: Optional[Callable[[], None]] = None
         self._on_state_changed_callback: Optional[Callable[[str], None]] = None
         self._on_state_change_enum_callback: Optional[Callable[[PlaybackState], None]] = None
@@ -82,12 +84,15 @@ class AudioPlayer:
             pygame.mixer.music.load(file_path)
             pygame.mixer.music.play()
             
+            # 检测音频时长
+            self._duration = self._detect_duration(file_path)
+            
             self._current_file = file_path
             self._is_playing = True
             self._is_paused = False
             self._on_finished_callback = on_finished
             
-            logger.info(f"开始播放音频: {file_path}")
+            logger.info(f"开始播放音频: {file_path}, 时长: {self._duration:.2f}秒")
             self._notify_state_changed("playing")
             
             return True
@@ -106,6 +111,7 @@ class AudioPlayer:
             pygame.mixer.music.stop()
             self._is_playing = False
             self._is_paused = False
+            self._duration = None
             
             logger.info("音频播放已停止")
             self._notify_state_changed("stopped")
@@ -208,6 +214,35 @@ class AudioPlayer:
         """
         return pygame.mixer.music.get_volume()
     
+    def get_duration(self) -> Optional[float]:
+        """
+        获取当前音频的总时长
+        
+        Returns:
+            音频总时长（秒），如果未加载音频则返回None
+        """
+        return self._duration
+    
+    def _detect_duration(self, file_path: str) -> Optional[float]:
+        """
+        检测音频文件的时长
+        
+        Args:
+            file_path: 音频文件路径
+            
+        Returns:
+            音频时长（秒），如果检测失败则返回None
+        """
+        try:
+            # 使用mutagen检测MP3文件时长
+            audio = MP3(file_path)
+            duration = audio.info.length
+            logger.debug(f"检测到音频时长: {duration:.2f}秒")
+            return duration
+        except Exception as e:
+            logger.warning(f"检测音频时长失败: {e}")
+            return None
+    
     def set_on_state_changed(self, callback: Optional[Callable[[str], None]]) -> None:
         """
         设置播放状态变化回调
@@ -299,6 +334,7 @@ class AudioPlayer:
         """
         self.stop()
         self._current_file = None
+        self._duration = None
         self._on_finished_callback = None
         self._on_state_changed_callback = None
         

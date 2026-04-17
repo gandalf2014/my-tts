@@ -1,0 +1,5 @@
+Looking in indexes: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+Collecting mutagen
+  Downloading https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/b0/7a/620f945b96be1f6ee357d211d5bf74ab1b7fe72a9f1525aafbfe3aee6875/mutagen-1.47.0-py3-none-any.whl (194 kB)
+Installing collected packages: mutagen
+Successfully installed mutagen-1.47.0
