@@ -1,239 +1,153 @@
 """
-语音生成模块 - 文本转语音核心逻辑
+语音生成模块 - 提供文本转语音生成功能
 """
 
 import asyncio
-import threading
 import tempfile
-import os
 import logging
-from typing import Optional, Callable
-from dataclasses import dataclass
-
-import edge_tts
-
-from .voice_manager import Voice
+from typing import Optional, Union
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class TTSOptions:
-    """TTS生成选项"""
-    rate: Optional[str] = None  # 语速: "-50%" to "+100%"
-    pitch: Optional[str] = None  # 音调: "-50Hz" to "+50Hz"
-    volume: Optional[str] = None  # 音量: "-50%" to "+100%"
-
-
 class TTSGenerator:
     """
-    语音生成器 - 将文本转换为语音
+    TTS语音生成器 - 将文本转换为语音
     
     功能:
-    - 异步生成语音
-    - 支持参数控制（语速、音调、音量）
-    - 支持生成到文件或内存
-    - 进度回调支持
+    - 同步/异步生成语音
+    - 支持输出到文件或内存
+    - 错误处理和日志记录
     """
     
-    def __init__(self):
-        self._is_generating = False
-        self._cancel_flag = False
+    def __init__(self, voice_name: str):
+        """
+        初始化TTS生成器
+        
+        Args:
+            voice_name: edge-tts语音名称，如 "zh-CN-XiaoxiaoNeural"
+        """
+        self.voice_name = voice_name
+        logger.info(f"TTSGenerator 初始化，语音: {voice_name}")
     
-    @property
-    def is_generating(self) -> bool:
-        """是否正在生成"""
-        return self._is_generating
+    def generate(self, text: str, output_path: Optional[str] = None) -> str:
+        """
+        同步生成语音
+        
+        Args:
+            text: 要转换的文本
+            output_path: 输出文件路径，如果为None则使用临时文件
+            
+        Returns:
+            生成的音频文件路径
+            
+        Raises:
+            ValueError: 文本为空
+            RuntimeError: 生成失败
+        """
+        if not text or not text.strip():
+            raise ValueError("文本不能为空")
+        
+        text = text.strip()
+        
+        # 确定输出路径
+        if output_path is None:
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+            output_path = temp_file.name
+            temp_file.close()
+        
+        logger.info(f"开始生成语音，文本长度: {len(text)} 字符，输出: {output_path}")
+        
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            import edge_tts
+            communicate = edge_tts.Communicate(text, self.voice_name)
+            loop.run_until_complete(communicate.save(output_path))
+            loop.close()
+            
+            logger.info(f"语音生成成功: {output_path}")
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"语音生成失败: {e}")
+            raise RuntimeError(f"语音生成失败: {e}") from e
     
-    def cancel(self) -> None:
-        """取消当前生成任务"""
-        self._cancel_flag = True
-    
-    def generate(
-        self,
-        text: str,
-        voice: Voice,
-        output_path: Optional[str] = None,
-        options: Optional[TTSOptions] = None,
-        on_complete: Optional[Callable[[str], None]] = None,
-        on_error: Optional[Callable[[Exception], None]] = None
-    ) -> None:
+    async def generate_async(self, text: str, output_path: Optional[str] = None) -> str:
         """
         异步生成语音
         
         Args:
             text: 要转换的文本
-            voice: Voice对象
             output_path: 输出文件路径，如果为None则使用临时文件
-            options: 生成选项
-            on_complete: 完成回调，参数为输出文件路径
-            on_error: 错误回调
+            
+        Returns:
+            生成的音频文件路径
+            
+        Raises:
+            ValueError: 文本为空
+            RuntimeError: 生成失败
         """
-        def _generate():
-            try:
-                self._is_generating = True
-                self._cancel_flag = False
-                
-                # 确定输出路径
-                if output_path is None:
-                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-                    temp_file.close()
-                    file_path = temp_file.name
-                else:
-                    file_path = output_path
-                
-                logger.info(f"开始生成语音: voice={voice.short_name}, text_length={len(text)}")
-                
-                # 创建异步事件循环
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                # 创建Communicate对象
-                kwargs = {"text": text, "voice": voice.short_name}
-                
-                # 添加参数（如果支持）
-                if options:
-                    if options.rate:
-                        kwargs["rate"] = options.rate
-                    if options.pitch:
-                        kwargs["pitch"] = options.pitch
-                    if options.volume:
-                        kwargs["volume"] = options.volume
-                
-                communicate = edge_tts.Communicate(**kwargs)
-                
-                # 生成音频
-                loop.run_until_complete(communicate.save(file_path))
-                loop.close()
-                
-                if self._cancel_flag:
-                    logger.info("生成已取消")
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    return
-                
-                logger.info(f"语音生成完成: {file_path}")
-                
-                if on_complete:
-                    on_complete(file_path)
-                    
-            except Exception as e:
-                logger.error(f"生成语音失败: {e}")
-                if on_error:
-                    on_error(e)
-                    
-            finally:
-                self._is_generating = False
+        if not text or not text.strip():
+            raise ValueError("文本不能为空")
         
-        thread = threading.Thread(target=_generate, daemon=True)
-        thread.start()
+        text = text.strip()
+        
+        # 确定输出路径
+        if output_path is None:
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+            output_path = temp_file.name
+            temp_file.close()
+        
+        logger.info(f"开始异步生成语音，文本长度: {len(text)} 字符，输出: {output_path}")
+        
+        try:
+            import edge_tts
+            communicate = edge_tts.Communicate(text, self.voice_name)
+            await communicate.save(output_path)
+            
+            logger.info(f"异步语音生成成功: {output_path}")
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"异步语音生成失败: {e}")
+            raise RuntimeError(f"异步语音生成失败: {e}") from e
     
-    def generate_sync(
-        self,
-        text: str,
-        voice: Voice,
-        output_path: Optional[str] = None,
-        options: Optional[TTSOptions] = None
-    ) -> str:
+    async def generate_to_bytes(self, text: str) -> bytes:
         """
-        同步生成语音（阻塞）
+        异步生成语音到内存
         
         Args:
             text: 要转换的文本
-            voice: Voice对象
-            output_path: 输出文件路径
-            options: 生成选项
             
         Returns:
-            输出文件路径
-        """
-        result_path = None
-        error = None
-        
-        def on_complete(path):
-            nonlocal result_path
-            result_path = path
+            音频数据(bytes)
             
-        def on_error(e):
-            nonlocal error
-            error = e
+        Raises:
+            ValueError: 文本为空
+            RuntimeError: 生成失败
+        """
+        if not text or not text.strip():
+            raise ValueError("文本不能为空")
         
-        # 在当前线程同步执行
-        self._is_generating = True
-        self._cancel_flag = False
+        text = text.strip()
+        
+        logger.info(f"开始生成语音到内存，文本长度: {len(text)} 字符")
         
         try:
-            if output_path is None:
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-                temp_file.close()
-                file_path = temp_file.name
-            else:
-                file_path = output_path
+            import edge_tts
+            communicate = edge_tts.Communicate(text, self.voice_name)
             
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            audio_data = bytearray()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_data.extend(chunk["data"])
             
-            kwargs = {"text": text, "voice": voice.short_name}
-            
-            if options:
-                if options.rate:
-                    kwargs["rate"] = options.rate
-                if options.pitch:
-                    kwargs["pitch"] = options.pitch
-                if options.volume:
-                    kwargs["volume"] = options.volume
-            
-            communicate = edge_tts.Communicate(**kwargs)
-            loop.run_until_complete(communicate.save(file_path))
-            loop.close()
-            
-            result_path = file_path
-            logger.info(f"语音生成完成: {result_path}")
+            logger.info(f"语音生成到内存成功，大小: {len(audio_data)} 字节")
+            return bytes(audio_data)
             
         except Exception as e:
-            logger.error(f"生成语音失败: {e}")
-            error = e
-            
-        finally:
-            self._is_generating = False
-        
-        if error:
-            raise error
-            
-        return result_path
-
-
-def create_tts_options(
-    speed: float = 1.0,
-    pitch: float = 1.0,
-    volume: float = 100.0
-) -> TTSOptions:
-    """
-    创建TTS选项的便捷函数
-    
-    Args:
-        speed: 语速倍率 (0.5 - 2.0)
-        pitch: 音调倍率 (0.5 - 2.0)
-        volume: 音量百分比 (0 - 100)
-        
-    Returns:
-        TTSOptions对象
-    """
-    options = TTSOptions()
-    
-    # 语速: 转换为百分比格式
-    if speed != 1.0:
-        rate_percent = int((speed - 1.0) * 100)
-        options.rate = f"{'+' if rate_percent >= 0 else ''}{rate_percent}%"
-    
-    # 音调: 转换为Hz格式
-    if pitch != 1.0:
-        pitch_hz = int((pitch - 1.0) * 50)
-        options.pitch = f"{'+' if pitch_hz >= 0 else ''}{pitch_hz}Hz"
-    
-    # 音量: 转换为百分比格式
-    if volume != 100.0:
-        vol_percent = int(volume - 100)
-        options.volume = f"{'+' if vol_percent >= 0 else ''}{vol_percent}%"
-    
-    return options
+            logger.error(f"语音生成到内存失败: {e}")
+            raise RuntimeError(f"语音生成到内存失败: {e}") from e
