@@ -204,6 +204,10 @@ class MainWindow:
         )
         self._control_panel.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=10)
         
+        # 设置暂停/继续和跳转回调
+        self._control_panel.set_on_pause_resume_callback(self._handle_pause_resume)
+        self._control_panel.set_on_seek_callback(self._handle_seek)
+        
         logger.debug("UI组件创建完成")
     
     def _connect_signals(self) -> None:
@@ -455,20 +459,68 @@ class MainWindow:
         if state == PlaybackState.PLAYING:
             # 开始播放进度检查
             self._check_playback_progress()
+        elif state == PlaybackState.STOPPED:
+            # 播放停止时重置进度显示
+            duration = self._audio_player.get_duration()
+            if duration:
+                self._control_panel.set_progress(0, duration)
     
     def _on_playback_complete(self) -> None:
         """播放完成回调"""
         self._control_panel.set_status("播放完成。")
     
+    def _handle_seek(self, position: float) -> None:
+        """
+        处理跳转请求
+        
+        Args:
+            position: 目标位置（秒）
+        """
+        logger.info(f"处理跳转请求: {position:.2f}秒")
+        if self._audio_player.seek(position):
+            # 跳转成功，更新进度显示
+            duration = self._audio_player.get_duration()
+            if duration:
+                self._control_panel.set_progress(position, duration)
+        else:
+            logger.warning(f"跳转失败: {position:.2f}秒")
+    
+    def _handle_pause_resume(self) -> None:
+        """处理暂停/继续请求"""
+        if self._audio_player.is_paused():
+            # 恢复播放
+            logger.info("恢复播放")
+            self._audio_player.resume()
+            self._control_panel.set_status("继续播放...")
+        elif self._audio_player.is_playing():
+            # 暂停播放
+            logger.info("暂停播放")
+            self._audio_player.pause()
+            self._control_panel.set_status("已暂停")
+        else:
+            logger.warning("暂停/继续请求无效：未在播放状态")
+    
     def _check_playback_progress(self) -> None:
         """检查播放进度"""
         if self._audio_player.is_playing():
-            # 更新进度（如果实现了进度跟踪）
-            # 这里暂时只是检查播放是否结束
+            # 获取当前播放位置和总时长
+            position = self._audio_player.get_position()
+            duration = self._audio_player.get_duration()
+            
+            # 更新进度显示
+            if position is not None and duration is not None:
+                self._control_panel.set_progress(position, duration)
+            
+            # 继续调度进度检查
             self._root.after(100, self._check_playback_progress)
-        elif not self._audio_player.is_paused():
-            # 播放结束
-            pass
+        elif self._audio_player.is_paused():
+            # 暂停时仍需定期检查状态（用户可能恢复播放）
+            self._root.after(100, self._check_playback_progress)
+        else:
+            # 播放结束，重置进度显示
+            duration = self._audio_player.get_duration()
+            if duration:
+                self._control_panel.set_progress(0, duration)
     
     def _on_close(self) -> None:
         """窗口关闭处理"""
