@@ -152,3 +152,19 @@ Thumbs.db
 *.temp
 *.bak
 *.backup
+
+# ── GSD baseline (auto-generated) ──
+.gsd
+.gsd-id
+.bg-shell/
+*.code-workspace
+.env.*
+!.env.example
+node_modules/
+.next/
+*.pyc
+.venv/
+vendor/
+coverage/
+.cache/
+tmp/
