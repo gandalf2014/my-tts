@@ -231,6 +231,7 @@ class MainWindow:
         self._tts_generator.generate(
             text=text,
             voice=voice,
+            options=self._control_panel.tts_options,
             on_complete=on_complete,
             on_error=on_error
         )
@@ -266,6 +267,7 @@ class MainWindow:
             text=text,
             voice=voice,
             output_path=output_path,
+            options=self._control_panel.tts_options,
             on_complete=on_complete,
             on_error=on_error
         )
