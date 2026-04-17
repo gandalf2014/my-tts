@@ -123,7 +123,6 @@ dmypy.json
 *.wav
 *.m4a
 temp_*
-test_*
 demo_*
 compare_*
 voice_*
