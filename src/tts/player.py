@@ -1,289 +1,273 @@
 """
-音频播放模块 - 播放MP3音频文件
+音频播放模块 - 提供音频播放控制功能
 """
 
 import os
 import logging
-import time
-from typing import Optional, Callable
-from enum import Enum
-
 import pygame
+from typing import Optional, Callable
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-class PlaybackState(Enum):
-    """播放状态"""
-    STOPPED = "stopped"
-    PLAYING = "playing"
-    PAUSED = "paused"
-
-
 class AudioPlayer:
     """
-    音频播放器 - 管理音频播放状态和控制
+    音频播放器 - 基于pygame的音频播放控制
     
     功能:
     - 播放、暂停、停止音频
-    - 播放进度查询
+    - 播放状态查询
     - 播放完成回调
+    - 音量控制
     """
     
     def __init__(self):
-        """初始化播放器"""
-        # 初始化pygame mixer
-        if not pygame.mixer.get_init():
-            pygame.mixer.init()
-        
-        self._state = PlaybackState.STOPPED
+        """初始化音频播放器"""
+        self._is_initialized = False
         self._current_file: Optional[str] = None
-        self._on_state_change: Optional[Callable[[PlaybackState], None]] = None
-        self._on_complete: Optional[Callable[[], None]] = None
-        self._check_thread = None
-        self._stop_check = False
-    
-    @property
-    def state(self) -> PlaybackState:
-        """当前播放状态"""
-        return self._state
-    
-    @property
-    def current_file(self) -> Optional[str]:
-        """当前加载的文件路径"""
-        return self._current_file
-    
-    @property
-    def is_playing(self) -> bool:
-        """是否正在播放"""
-        return self._state == PlaybackState.PLAYING
-    
-    @property
-    def is_paused(self) -> bool:
-        """是否已暂停"""
-        return self._state == PlaybackState.PAUSED
-    
-    @property
-    def duration(self) -> float:
-        """音频总时长（秒）"""
-        if self._current_file and os.path.exists(self._current_file):
-            try:
-                sound = pygame.mixer.Sound(self._current_file)
-                return sound.get_length()
-            except Exception:
-                pass
-        return 0.0
-    
-    @property
-    def position(self) -> float:
-        """当前播放位置（秒）- pygame不支持精确查询，返回估计值"""
-        return 0.0  # pygame.mixer不支持获取当前播放位置
-    
-    def set_callbacks(
-        self,
-        on_state_change: Optional[Callable[[PlaybackState], None]] = None,
-        on_complete: Optional[Callable[[], None]] = None
-    ) -> None:
-        """
-        设置回调函数
+        self._is_playing = False
+        self._is_paused = False
+        self._on_finished_callback: Optional[Callable[[], None]] = None
+        self._on_state_changed_callback: Optional[Callable[[str], None]] = None
         
-        Args:
-            on_state_change: 状态变化回调
-            on_complete: 播放完成回调
-        """
-        self._on_state_change = on_state_change
-        self._on_complete = on_complete
+        self._init_mixer()
+        logger.info("AudioPlayer 初始化完成")
     
-    def load(self, file_path: str) -> bool:
+    def _init_mixer(self):
+        """初始化pygame mixer"""
+        if not self._is_initialized:
+            try:
+                pygame.mixer.init()
+                self._is_initialized = True
+                logger.debug("pygame mixer 初始化成功")
+            except Exception as e:
+                logger.error(f"pygame mixer 初始化失败: {e}")
+                raise RuntimeError(f"音频系统初始化失败: {e}") from e
+    
+    def play(self, file_path: str, on_finished: Optional[Callable[[], None]] = None) -> bool:
         """
-        加载音频文件
+        播放音频文件
         
         Args:
             file_path: 音频文件路径
-            
-        Returns:
-            是否成功加载
-        """
-        if not os.path.exists(file_path):
-            logger.error(f"音频文件不存在: {file_path}")
-            return False
-        
-        try:
-            # 如果正在播放，先停止
-            if self._state != PlaybackState.STOPPED:
-                self.stop()
-            
-            self._current_file = file_path
-            logger.info(f"已加载音频文件: {file_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"加载音频失败: {e}")
-            return False
-    
-    def play(self, file_path: Optional[str] = None) -> bool:
-        """
-        播放音频
-        
-        Args:
-            file_path: 音频文件路径，如果为None则播放当前已加载的文件
+            on_finished: 播放完成回调函数
             
         Returns:
             是否成功开始播放
+            
+        Raises:
+            FileNotFoundError: 文件不存在
+            RuntimeError: 播放失败
         """
-        # 如果已暂停，恢复播放
-        if self._state == PlaybackState.PAUSED:
-            return self.resume()
-        
-        # 加载文件
-        if file_path:
-            if not self.load(file_path):
-                return False
-        
-        if not self._current_file:
-            logger.error("没有可播放的音频文件")
-            return False
+        if not os.path.exists(file_path):
+            logger.error(f"音频文件不存在: {file_path}")
+            raise FileNotFoundError(f"音频文件不存在: {file_path}")
         
         try:
-            pygame.mixer.music.load(self._current_file)
+            # 如果正在播放，先停止
+            if self._is_playing:
+                self.stop()
+            
+            # 加载并播放
+            pygame.mixer.music.load(file_path)
             pygame.mixer.music.play()
             
-            self._set_state(PlaybackState.PLAYING)
-            self._start_check_thread()
+            self._current_file = file_path
+            self._is_playing = True
+            self._is_paused = False
+            self._on_finished_callback = on_finished
             
-            logger.info(f"开始播放: {self._current_file}")
+            logger.info(f"开始播放音频: {file_path}")
+            self._notify_state_changed("playing")
+            
             return True
             
         except Exception as e:
-            logger.error(f"播放失败: {e}")
-            return False
+            logger.error(f"播放音频失败: {e}")
+            raise RuntimeError(f"播放音频失败: {e}") from e
+    
+    def stop(self) -> None:
+        """
+        停止音频播放
+        
+        停止当前播放并重置状态
+        """
+        if self._is_playing or self._is_paused:
+            pygame.mixer.music.stop()
+            self._is_playing = False
+            self._is_paused = False
+            
+            logger.info("音频播放已停止")
+            self._notify_state_changed("stopped")
     
     def pause(self) -> bool:
         """
-        暂停播放
+        暂停音频播放
         
         Returns:
-            是否成功暂停
+            是否成功暂停（如果未在播放则返回False）
         """
-        if self._state != PlaybackState.PLAYING:
-            return False
-        
-        try:
+        if self._is_playing and not self._is_paused:
             pygame.mixer.music.pause()
-            self._set_state(PlaybackState.PAUSED)
-            logger.info("播放已暂停")
-            return True
+            self._is_paused = True
             
-        except Exception as e:
-            logger.error(f"暂停失败: {e}")
-            return False
+            logger.info("音频播放已暂停")
+            self._notify_state_changed("paused")
+            return True
+        
+        return False
     
     def resume(self) -> bool:
         """
-        恢复播放
+        恢复音频播放
         
         Returns:
-            是否成功恢复
+            是否成功恢复（如果未暂停则返回False）
         """
-        if self._state != PlaybackState.PAUSED:
-            return False
-        
-        try:
+        if self._is_paused:
             pygame.mixer.music.unpause()
-            self._set_state(PlaybackState.PLAYING)
-            self._start_check_thread()
-            logger.info("播放已恢复")
+            self._is_paused = False
+            self._is_playing = True
+            
+            logger.info("音频播放已恢复")
+            self._notify_state_changed("playing")
             return True
-            
-        except Exception as e:
-            logger.error(f"恢复播放失败: {e}")
-            return False
-    
-    def stop(self) -> None:
-        """停止播放"""
-        try:
-            pygame.mixer.music.stop()
-            self._stop_check = True
-            self._set_state(PlaybackState.STOPPED)
-            logger.info("播放已停止")
-            
-        except Exception as e:
-            logger.error(f"停止失败: {e}")
-    
-    def seek(self, position: float) -> bool:
-        """
-        跳转到指定位置
         
-        注意: pygame.mixer不支持精确seek，此方法仅返回当前状态
-        
-        Args:
-            position: 目标位置（秒）
-            
-        Returns:
-            是否成功跳转
-        """
-        # pygame.mixer.music不支持seek操作
-        logger.warning("pygame.mixer不支持seek操作")
         return False
+    
+    def is_playing(self) -> bool:
+        """
+        检查是否正在播放
+        
+        Returns:
+            是否正在播放（不包括暂停状态）
+        """
+        if not self._is_playing:
+            return False
+        
+        # 检查pygame的实际播放状态
+        # 注意：暂停时get_busy()返回True
+        if not pygame.mixer.music.get_busy():
+            # 播放已自然结束
+            self._handle_playback_finished()
+            return False
+        
+        # 如果是暂停状态，返回False
+        return not self._is_paused
+    
+    def is_paused(self) -> bool:
+        """
+        检查是否暂停
+        
+        Returns:
+            是否处于暂停状态
+        """
+        return self._is_paused
+    
+    def get_current_file(self) -> Optional[str]:
+        """
+        获取当前播放的文件路径
+        
+        Returns:
+            当前音频文件路径，如果未加载则返回None
+        """
+        return self._current_file
     
     def set_volume(self, volume: float) -> None:
         """
-        设置播放音量
+        设置音量
         
         Args:
-            volume: 音量 (0.0 - 1.0)
+            volume: 音量值，范围0.0-1.0
+            
+        Raises:
+            ValueError: 音量值超出范围
         """
-        pygame.mixer.music.set_volume(max(0.0, min(1.0, volume)))
+        if not 0.0 <= volume <= 1.0:
+            raise ValueError("音量值必须在0.0到1.0之间")
+        
+        pygame.mixer.music.set_volume(volume)
+        logger.debug(f"音量设置为: {volume}")
     
     def get_volume(self) -> float:
-        """获取当前音量 (0.0 - 1.0)"""
+        """
+        获取当前音量
+        
+        Returns:
+            当前音量值，范围0.0-1.0
+        """
         return pygame.mixer.music.get_volume()
     
-    def _set_state(self, state: PlaybackState) -> None:
-        """设置状态并触发回调"""
-        if self._state != state:
-            self._state = state
-            if self._on_state_change:
-                try:
-                    self._on_state_change(state)
-                except Exception as e:
-                    logger.error(f"状态回调执行失败: {e}")
+    def set_on_state_changed(self, callback: Optional[Callable[[str], None]]) -> None:
+        """
+        设置播放状态变化回调
+        
+        Args:
+            callback: 回调函数，接收状态字符串参数
+                     状态值: "playing", "paused", "stopped", "finished"
+        """
+        self._on_state_changed_callback = callback
+        logger.debug(f"状态变化回调已{'设置' if callback else '清除'}")
     
-    def _start_check_thread(self) -> None:
-        """启动播放完成检查线程"""
-        import threading
+    def _notify_state_changed(self, state: str) -> None:
+        """通知状态变化"""
+        if self._on_state_changed_callback:
+            try:
+                self._on_state_changed_callback(state)
+            except Exception as e:
+                logger.error(f"状态变化回调执行失败: {e}")
+    
+    def _handle_playback_finished(self) -> None:
+        """处理播放完成"""
+        was_playing = self._is_playing
+        self._is_playing = False
+        self._is_paused = False
         
-        self._stop_check = False
+        if was_playing:
+            logger.info("音频播放完成")
+            self._notify_state_changed("finished")
+            
+            # 执行播放完成回调
+            if self._on_finished_callback:
+                try:
+                    self._on_finished_callback()
+                except Exception as e:
+                    logger.error(f"播放完成回调执行失败: {e}")
+    
+    def check_playback(self) -> bool:
+        """
+        检查播放状态并处理播放完成
         
-        def _check():
-            while not self._stop_check:
-                if self._state == PlaybackState.PLAYING:
-                    if not pygame.mixer.music.get_busy():
-                        # 播放完成
-                        self._set_state(PlaybackState.STOPPED)
-                        if self._on_complete:
-                            try:
-                                self._on_complete()
-                            except Exception as e:
-                                logger.error(f"完成回调执行失败: {e}")
-                        break
-                time.sleep(0.1)
+        用于在GUI主循环中定期调用，检测播放是否自然结束
         
-        thread = threading.Thread(target=_check, daemon=True)
-        thread.start()
+        Returns:
+            是否仍在播放
+        """
+        if self._is_playing and not self._is_paused:
+            if not pygame.mixer.music.get_busy():
+                self._handle_playback_finished()
+                return False
+            return True
+        return False
     
     def cleanup(self) -> None:
-        """清理资源"""
+        """
+        清理资源
+        
+        停止播放并清理临时资源
+        """
         self.stop()
-        if self._current_file and os.path.exists(self._current_file):
-            try:
-                # 如果是临时文件，删除它
-                if self._current_file.startswith(tempfile.gettempdir()):
-                    os.remove(self._current_file)
-            except Exception:
-                pass
         self._current_file = None
-
-
-# 导入tempfile用于cleanup
-import tempfile
+        self._on_finished_callback = None
+        self._on_state_changed_callback = None
+        
+        logger.info("AudioPlayer 资源已清理")
+    
+    def __del__(self):
+        """析构时清理资源"""
+        try:
+            if self._is_initialized and (self._is_playing or self._is_paused):
+                self.stop()
+        except Exception:
+            pass  # 忽略析构时的错误
