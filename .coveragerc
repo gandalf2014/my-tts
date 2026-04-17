@@ -1,0 +1,13 @@
+[run]
+source = src
+omit =
+    */tests/*
+    */__pycache__/*
+    src/main.py
+    src/gui/dialogs.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
