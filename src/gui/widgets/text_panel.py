@@ -5,6 +5,9 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 from typing import Optional, Callable
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class TextPanel(ttk.Frame):
@@ -56,6 +59,8 @@ class TextPanel(ttk.Frame):
         # 绑定文本变化事件
         if on_text_change:
             self._text_widget.bind("<KeyRelease>", self._handle_text_change)
+        
+        logger.debug("TextPanel 初始化完成")
     
     @property
     def text(self) -> str:
@@ -67,14 +72,17 @@ class TextPanel(ttk.Frame):
         """设置文本内容"""
         self._text_widget.delete("1.0", tk.END)
         self._text_widget.insert("1.0", value)
+        logger.debug(f"文本已设置，长度: {len(value)} 字符")
     
     def append(self, text: str) -> None:
         """追加文本"""
         self._text_widget.insert(tk.END, text)
+        logger.debug(f"追加文本，长度: {len(text)} 字符")
     
     def clear(self) -> None:
         """清空文本"""
         self._text_widget.delete("1.0", tk.END)
+        logger.debug("文本已清空")
     
     def _handle_text_change(self, event) -> None:
         """处理文本变化事件"""

@@ -7,8 +7,16 @@ import logging
 import pygame
 from typing import Optional, Callable
 from pathlib import Path
+from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+class PlaybackState(Enum):
+    """播放状态枚举"""
+    STOPPED = "stopped"
+    PLAYING = "playing"
+    PAUSED = "paused"
 
 
 class AudioPlayer:
@@ -30,6 +38,7 @@ class AudioPlayer:
         self._is_paused = False
         self._on_finished_callback: Optional[Callable[[], None]] = None
         self._on_state_changed_callback: Optional[Callable[[str], None]] = None
+        self._on_state_change_enum_callback: Optional[Callable[[PlaybackState], None]] = None
         
         self._init_mixer()
         logger.info("AudioPlayer 初始化完成")
@@ -210,13 +219,44 @@ class AudioPlayer:
         self._on_state_changed_callback = callback
         logger.debug(f"状态变化回调已{'设置' if callback else '清除'}")
     
+    def set_callbacks(
+        self,
+        on_state_change: Optional[Callable[[PlaybackState], None]] = None,
+        on_complete: Optional[Callable[[], None]] = None
+    ) -> None:
+        """
+        设置播放器回调（支持PlaybackState枚举）
+        
+        Args:
+            on_state_change: 状态变化回调，接收PlaybackState枚举值
+            on_complete: 播放完成回调
+        """
+        self._on_state_change_enum_callback = on_state_change
+        if on_complete:
+            self._on_finished_callback = on_complete
+        logger.debug(f"回调已设置: state_change={on_state_change is not None}, complete={on_complete is not None}")
+    
     def _notify_state_changed(self, state: str) -> None:
         """通知状态变化"""
+        # 调用字符串回调
         if self._on_state_changed_callback:
             try:
                 self._on_state_changed_callback(state)
             except Exception as e:
                 logger.error(f"状态变化回调执行失败: {e}")
+        
+        # 调用枚举回调
+        if self._on_state_change_enum_callback:
+            try:
+                state_enum = {
+                    "playing": PlaybackState.PLAYING,
+                    "paused": PlaybackState.PAUSED,
+                    "stopped": PlaybackState.STOPPED,
+                    "finished": PlaybackState.STOPPED
+                }.get(state, PlaybackState.STOPPED)
+                self._on_state_change_enum_callback(state_enum)
+            except Exception as e:
+                logger.error(f"枚举状态变化回调执行失败: {e}")
     
     def _handle_playback_finished(self) -> None:
         """处理播放完成"""

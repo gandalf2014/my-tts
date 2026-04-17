@@ -6,10 +6,13 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Optional, Callable, List, Dict, Any
 from dataclasses import dataclass
+import logging
 
 from ...tts.voice_manager import Voice, VoiceManager
 from ...tts.generator import TTSOptions
 from ...tts.player import PlaybackState
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -78,6 +81,8 @@ class ControlPanel(ttk.Frame):
         
         # 构建UI
         self._create_widgets()
+        
+        logger.debug("ControlPanel 初始化完成")
     
     def _create_widgets(self) -> None:
         """创建控件"""
@@ -250,6 +255,7 @@ class ControlPanel(ttk.Frame):
             voices: Voice对象列表
         """
         self._voices = voices
+        logger.info(f"更新语音列表，共 {len(voices)} 个语音")
         
         # 更新语言列表
         languages = self._voice_manager.get_languages()
@@ -299,6 +305,9 @@ class ControlPanel(ttk.Frame):
             display_name, language
         )
         
+        if self._current_voice:
+            logger.debug(f"语音已选择: {display_name}")
+        
         if self._on_voice_change and self._current_voice:
             self._on_voice_change(self._current_voice)
     
@@ -335,15 +344,18 @@ class ControlPanel(ttk.Frame):
         """播放按钮点击处理"""
         if self._is_playing and not self._is_paused:
             # 正在播放 → 停止
+            logger.debug("停止按钮点击")
             if self._on_stop:
                 self._on_stop()
         else:
             # 未播放或已暂停 → 播放
+            logger.debug("播放按钮点击")
             if self._on_play:
                 self._on_play()
     
     def _handle_save_click(self) -> None:
         """保存按钮点击处理"""
+        logger.debug("保存按钮点击")
         if self._on_save:
             self._on_save()
     
@@ -375,10 +387,12 @@ class ControlPanel(ttk.Frame):
             self._is_playing = False
             self._is_paused = False
             self._play_btn.config(text="试听")
+        logger.debug(f"播放状态变更: {state.value}")
     
     def set_status(self, status: str) -> None:
         """设置状态文本"""
         self._status_var.set(status)
+        logger.debug(f"状态更新: {status}")
     
     def set_progress(self, current: float, total: float) -> None:
         """设置进度"""
