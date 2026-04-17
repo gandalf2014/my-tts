@@ -70,10 +70,18 @@ class ControlPanel(ttk.Frame):
         self._on_voice_change = on_voice_change
         self._on_param_change = on_param_change
         
+        # 暂停/继续和跳转回调
+        self._on_pause_resume: Optional[Callable[[], None]] = None
+        self._on_seek: Optional[Callable[[float], None]] = None
+        
         self._voices: List[Voice] = []
         self._current_voice: Optional[Voice] = None
         self._is_playing = False
         self._is_paused = False
+        
+        # 进度条交互状态
+        self._is_dragging = False
+        self._total_duration: float = 0.0
         
         # 参数状态
         self._speed_var = tk.DoubleVar(value=1.0)
@@ -270,6 +278,12 @@ class ControlPanel(ttk.Frame):
         self._progress_bar.grid(
             row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 20)
         )
+        
+        # 绑定进度条鼠标事件
+        self._progress_bar.bind('<Button-1>', self._on_progress_click)
+        self._progress_bar.bind('<B1-Motion>', self._on_progress_drag)
+        self._progress_bar.bind('<ButtonRelease-1>', self._on_progress_release)
+        
         row += 1
         
         # 控制按钮
@@ -277,16 +291,24 @@ class ControlPanel(ttk.Frame):
         button_frame.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E))
         button_frame.columnconfigure(0, weight=1)
         button_frame.columnconfigure(1, weight=1)
+        button_frame.columnconfigure(2, weight=1)
         
         self._play_btn = ttk.Button(
             button_frame, text="试听", command=self._handle_play_click
         )
         self._play_btn.grid(row=0, column=0, padx=(0, 5), sticky=(tk.W, tk.E))
         
+        # 暂停/继续按钮
+        self._pause_btn = ttk.Button(
+            button_frame, text="暂停", command=self._handle_pause_click
+        )
+        self._pause_btn.grid(row=0, column=1, padx=(5, 5), sticky=(tk.W, tk.E))
+        self._pause_btn.grid_remove()  # 默认隐藏
+        
         self._save_btn = ttk.Button(
             button_frame, text="保存", command=self._handle_save_click
         )
-        self._save_btn.grid(row=0, column=1, padx=(5, 0), sticky=(tk.W, tk.E))
+        self._save_btn.grid(row=0, column=2, padx=(5, 0), sticky=(tk.W, tk.E))
         row += 1
         
         # 状态标签
@@ -408,6 +430,67 @@ class ControlPanel(ttk.Frame):
         if self._on_save:
             self._on_save()
     
+    def _handle_pause_click(self) -> None:
+        """暂停/继续按钮点击处理"""
+        logger.debug("暂停/继续按钮点击")
+        if self._on_pause_resume:
+            self._on_pause_resume()
+    
+    def _on_progress_click(self, event) -> None:
+        """进度条点击处理"""
+        self._is_dragging = True
+        self._update_progress_from_event(event)
+    
+    def _on_progress_drag(self, event) -> None:
+        """进度条拖动处理"""
+        if self._is_dragging:
+            self._update_progress_from_event(event)
+    
+    def _on_progress_release(self, event) -> None:
+        """进度条释放处理"""
+        if self._is_dragging:
+            self._is_dragging = False
+            # 计算跳转位置
+            position = self._calculate_position_from_event(event)
+            if position is not None and self._on_seek:
+                logger.debug(f"跳转到位置: {position:.2f}秒")
+                self._on_seek(position)
+    
+    def _update_progress_from_event(self, event) -> None:
+        """根据鼠标事件更新进度条显示"""
+        position = self._calculate_position_from_event(event)
+        if position is not None and self._total_duration > 0:
+            # 更新进度条显示
+            progress_percent = (position / self._total_duration) * 100
+            self._progress_bar['value'] = progress_percent
+            
+            # 更新时间显示
+            current_str = self._format_time(position)
+            total_str = self._format_time(self._total_duration)
+            self._progress_label.config(text=f"进度: {current_str} / {total_str}")
+    
+    def _calculate_position_from_event(self, event) -> Optional[float]:
+        """从鼠标事件计算播放位置"""
+        if self._total_duration <= 0:
+            return None
+        
+        # 获取进度条宽度
+        try:
+            width = self._progress_bar.winfo_width()
+        except Exception:
+            return None
+        
+        if width <= 0:
+            return None
+        
+        # 计算点击位置的百分比
+        x = max(0, min(event.x, width))  # 限制在进度条范围内
+        percent = x / width
+        
+        # 转换为时间
+        position = percent * self._total_duration
+        return position
+    
     @property
     def current_voice(self) -> Optional[Voice]:
         """当前选择的语音"""
@@ -429,13 +512,18 @@ class ControlPanel(ttk.Frame):
             self._is_playing = True
             self._is_paused = False
             self._play_btn.config(text="停止")
+            self._pause_btn.config(text="暂停")
+            self._pause_btn.grid()  # 显示暂停按钮
         elif state == PlaybackState.PAUSED:
             self._is_paused = True
-            self._play_btn.config(text="继续")
+            self._play_btn.config(text="停止")
+            self._pause_btn.config(text="继续")
+            self._pause_btn.grid()  # 确保暂停按钮可见
         else:  # STOPPED
             self._is_playing = False
             self._is_paused = False
             self._play_btn.config(text="试听")
+            self._pause_btn.grid_remove()  # 隐藏暂停按钮
         logger.debug(f"播放状态变更: {state.value}")
     
     def set_status(self, status: str) -> None:
@@ -445,14 +533,17 @@ class ControlPanel(ttk.Frame):
     
     def set_progress(self, current: float, total: float) -> None:
         """设置进度"""
-        if total > 0:
-            progress_percent = (current / total) * 100
-            self._progress_bar['value'] = progress_percent
-            
-            # 格式化时间
-            current_str = self._format_time(current)
-            total_str = self._format_time(total)
-            self._progress_label.config(text=f"进度: {current_str} / {total_str}")
+        self._total_duration = total
+        
+        if not self._is_dragging:  # 只在非拖动时更新进度条
+            if total > 0:
+                progress_percent = (current / total) * 100
+                self._progress_bar['value'] = progress_percent
+                
+                # 格式化时间
+                current_str = self._format_time(current)
+                total_str = self._format_time(total)
+                self._progress_label.config(text=f"进度: {current_str} / {total_str}")
     
     @staticmethod
     def _format_time(seconds: float) -> str:
@@ -478,6 +569,29 @@ class ControlPanel(ttk.Frame):
         state = tk.NORMAL if enabled else tk.DISABLED
         self._play_btn.config(state=state)
         self._save_btn.config(state=state)
+        self._pause_btn.config(state=state)
+    
+    # ===== 暂停/跳转回调设置 =====
+    
+    def set_on_pause_resume_callback(self, callback: Optional[Callable[[], None]]) -> None:
+        """
+        设置暂停/继续回调
+        
+        Args:
+            callback: 暂停/继续回调函数
+        """
+        self._on_pause_resume = callback
+        logger.debug(f"暂停/继续回调已{'设置' if callback else '清除'}")
+    
+    def set_on_seek_callback(self, callback: Optional[Callable[[float], None]]) -> None:
+        """
+        设置跳转回调
+        
+        Args:
+            callback: 跳转回调函数，参数为跳转位置（秒）
+        """
+        self._on_seek = callback
+        logger.debug(f"跳转回调已{'设置' if callback else '清除'}")
     
     # ===== 预设管理方法 =====
     
