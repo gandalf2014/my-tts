@@ -193,6 +193,25 @@ def mock_audio_file(temp_dir: Path) -> Path:
 
 
 # ============================================================================
+# BatchProcessor fixtures
+# ============================================================================
+
+@pytest.fixture
+def batch_config():
+    """BatchConfig实例"""
+    from src.tts.batch_processor import BatchConfig
+    return BatchConfig()
+
+
+@pytest.fixture
+def batch_processor(tts_generator, temp_dir):
+    """BatchProcessor实例（使用临时输出目录）"""
+    from src.tts.batch_processor import BatchProcessor, BatchConfig
+    config = BatchConfig(output_directory=str(temp_dir))
+    return BatchProcessor(tts_generator, config)
+
+
+# ============================================================================
 # 回调fixtures
 # ============================================================================
 
