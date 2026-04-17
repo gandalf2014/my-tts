@@ -13,6 +13,18 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class VoicePreset:
+    """语音预设数据类 - 保存语音配置快照"""
+    name: str  # 预设名称，如 "播客女声"
+    voice_short_name: str  # 语音短名称，如 "zh-CN-XiaoxiaoMultilingualNeural"
+    voice_display_name: str  # 语音显示名称，如 "晓晓 / Xiaoxiao"
+    language: str  # 语言，如 "中文 (所有地区)"
+    speed: float = 1.0  # 语速
+    pitch: float = 1.0  # 音调
+    volume: float = 100.0  # 音量
+
+
+@dataclass
 class AppConfig:
     """应用配置数据类"""
     # 窗口设置
@@ -38,6 +50,9 @@ class AppConfig:
     # 批量处理设置
     last_batch_import_dir: str = ""
     batch_segmentation_mode: str = "paragraph"  # "paragraph" or "chars"
+    
+    # 语音预设列表
+    voice_presets: list = field(default_factory=list)
 
 
 class Settings:
@@ -165,3 +180,136 @@ class Settings:
         """重置为默认配置并保存"""
         self.reset()
         self.save()
+
+
+class PresetManager:
+    """
+    语音预设管理器 - 管理语音预设的CRUD操作
+    
+    功能:
+    - 保存语音预设（检测重复名称）
+    - 加载语音预设
+    - 删除语音预设
+    - 列出所有预设
+    """
+    
+    @staticmethod
+    def save_preset(config: AppConfig, preset: VoicePreset) -> bool:
+        """
+        保存语音预设到配置
+        
+        Args:
+            config: 应用配置对象
+            preset: 语音预设对象
+            
+        Returns:
+            是否成功保存
+        """
+        try:
+            # 检查是否存在同名预设
+            existing_index = None
+            for i, p in enumerate(config.voice_presets):
+                if isinstance(p, dict) and p.get('name') == preset.name:
+                    existing_index = i
+                    break
+                elif isinstance(p, VoicePreset) and p.name == preset.name:
+                    existing_index = i
+                    break
+            
+            preset_dict = asdict(preset)
+            
+            if existing_index is not None:
+                # 覆盖现有预设
+                logger.warning(f"覆盖同名预设: {preset.name}")
+                config.voice_presets[existing_index] = preset_dict
+            else:
+                # 添加新预设
+                config.voice_presets.append(preset_dict)
+                logger.info(f"保存语音预设: {preset.name}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"保存预设失败: {preset.name}, 错误: {e}")
+            return False
+    
+    @staticmethod
+    def load_preset(config: AppConfig, name: str) -> Optional[VoicePreset]:
+        """
+        加载语音预设
+        
+        Args:
+            config: 应用配置对象
+            name: 预设名称
+            
+        Returns:
+            VoicePreset对象，如果不存在返回None
+        """
+        try:
+            for p in config.voice_presets:
+                if isinstance(p, dict) and p.get('name') == name:
+                    logger.info(f"加载语音预设: {name}")
+                    return VoicePreset(**p)
+                elif isinstance(p, VoicePreset) and p.name == name:
+                    logger.info(f"加载语音预设: {name}")
+                    return p
+            
+            logger.warning(f"未找到预设: {name}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"加载预设失败: {name}, 错误: {e}")
+            return None
+    
+    @staticmethod
+    def delete_preset(config: AppConfig, name: str) -> bool:
+        """
+        删除语音预设
+        
+        Args:
+            config: 应用配置对象
+            name: 预设名称
+            
+        Returns:
+            是否成功删除
+        """
+        try:
+            for i, p in enumerate(config.voice_presets):
+                preset_name = p.get('name') if isinstance(p, dict) else p.name
+                if preset_name == name:
+                    config.voice_presets.pop(i)
+                    logger.info(f"删除语音预设: {name}")
+                    return True
+            
+            logger.warning(f"删除预设失败，未找到: {name}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"删除预设失败: {name}, 错误: {e}")
+            return False
+    
+    @staticmethod
+    def list_presets(config: AppConfig) -> list:
+        """
+        列出所有语音预设
+        
+        Args:
+            config: 应用配置对象
+            
+        Returns:
+            VoicePreset对象列表
+        """
+        presets = []
+        try:
+            for p in config.voice_presets:
+                if isinstance(p, dict):
+                    presets.append(VoicePreset(**p))
+                elif isinstance(p, VoicePreset):
+                    presets.append(p)
+            
+            logger.debug(f"列出语音预设: {len(presets)}个")
+            return presets
+            
+        except Exception as e:
+            logger.error(f"列出预设失败: {e}")
+            return []
