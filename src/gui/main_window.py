@@ -6,13 +6,16 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import logging
 import os
-from typing import Optional
+from typing import Optional, List
+from pathlib import Path
 
 from .widgets.text_panel import TextPanel
 from .widgets.control_panel import ControlPanel
+from .widgets.batch_panel import BatchDialog
 from ..tts.voice_manager import VoiceManager
 from ..tts.generator import TTSGenerator, TTSOptions
 from ..tts.player import AudioPlayer, PlaybackState
+from ..tts.batch_processor import BatchProcessor, BatchConfig, SegmentationMode
 from ..config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -48,6 +51,15 @@ class MainWindow:
         self._tts_generator = TTSGenerator()
         self._audio_player = AudioPlayer()
         
+        # 批量处理器
+        batch_config = BatchConfig(
+            segmentation_mode=SegmentationMode.PARAGRAPH
+        )
+        self._batch_processor = BatchProcessor(
+            generator=self._tts_generator,
+            config=batch_config
+        )
+        
         # 当前状态
         self._current_voice = None
         self._current_audio_file: Optional[str] = None
@@ -55,6 +67,9 @@ class MainWindow:
         
         # 设置窗口属性
         self._setup_window()
+        
+        # 创建菜单栏
+        self._create_menu_bar()
         
         # 创建UI组件
         self._create_widgets()
@@ -81,6 +96,84 @@ class MainWindow:
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
         
         logger.debug(f"窗口设置完成: {width}x{height}")
+    
+    def _create_menu_bar(self) -> None:
+        """创建菜单栏"""
+        # 创建菜单栏
+        menubar = tk.Menu(self._root)
+        self._root.config(menu=menubar)
+        
+        # 文件菜单
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="文件", menu=file_menu)
+        
+        # 批量处理菜单项
+        file_menu.add_command(
+            label="批量处理...",
+            command=self._open_batch_dialog,
+            accelerator="Ctrl+B"
+        )
+        
+        # 分隔线
+        file_menu.add_separator()
+        
+        # 退出菜单项
+        file_menu.add_command(
+            label="退出",
+            command=self._on_close,
+            accelerator="Ctrl+Q"
+        )
+        
+        # 绑定快捷键
+        self._root.bind("<Control-b>", lambda e: self._open_batch_dialog())
+        self._root.bind("<Control-q>", lambda e: self._on_close())
+        
+        logger.debug("菜单栏创建完成")
+    
+    def _open_batch_dialog(self) -> None:
+        """打开批量处理对话框"""
+        # 从设置恢复批量处理配置
+        last_import_dir = self._settings.get("last_batch_import_dir", "")
+        segmentation_mode_str = self._settings.get("batch_segmentation_mode", "paragraph")
+        
+        # 更新BatchProcessor配置
+        if segmentation_mode_str == "chars":
+            self._batch_processor.config.segmentation_mode = SegmentationMode.CHARS
+        else:
+            self._batch_processor.config.segmentation_mode = SegmentationMode.PARAGRAPH
+        
+        # 创建并显示批量处理对话框
+        dialog = BatchDialog(
+            parent=self._root,
+            batch_processor=self._batch_processor,
+            voice=self._current_voice,
+            options=self._control_panel.tts_options,
+            on_complete=self._on_batch_complete
+        )
+        
+        # 等待对话框关闭
+        self._root.wait_window(dialog)
+        
+        logger.debug("批量处理对话框已打开")
+    
+    def _on_batch_complete(
+        self,
+        success_files: List[str],
+        failed_segments
+    ) -> None:
+        """批量处理完成回调"""
+        success_count = len(success_files)
+        failed_count = len(failed_segments)
+        
+        # 更新状态
+        if failed_count == 0:
+            self._control_panel.set_status(f"批量处理完成，共 {success_count} 个文件")
+        else:
+            self._control_panel.set_status(
+                f"批量处理完成，成功 {success_count} 个，失败 {failed_count} 个"
+            )
+        
+        logger.info(f"批量处理完成回调: 成功 {success_count}, 失败 {failed_count}")
     
     def _create_widgets(self) -> None:
         """创建UI组件"""
@@ -308,6 +401,14 @@ class MainWindow:
         # 保存设置
         self._settings.set("window_width", self._root.winfo_width())
         self._settings.set("window_height", self._root.winfo_height())
+        
+        # 保存批量处理设置
+        segmentation_mode = self._batch_processor.config.segmentation_mode
+        self._settings.set(
+            "batch_segmentation_mode",
+            segmentation_mode.value if segmentation_mode else "paragraph"
+        )
+        
         self._settings.save()
         
         # 清理资源

@@ -34,6 +34,10 @@ class AppConfig:
     # 其他设置
     auto_play_after_generate: bool = True
     last_save_directory: str = ""
+    
+    # 批量处理设置
+    last_batch_import_dir: str = ""
+    batch_segmentation_mode: str = "paragraph"  # "paragraph" or "chars"
 
 
 class Settings:
