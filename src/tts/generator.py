@@ -169,7 +169,11 @@ class TTSGenerator:
                     asyncio.set_event_loop(loop)
                     
                     import edge_tts
-                    communicate = edge_tts.Communicate(text, voice_name)
+                    # 转换options参数
+                    tts_kwargs = {}
+                    if options:
+                        tts_kwargs = self._convert_options_to_edge_tts(options)
+                    communicate = edge_tts.Communicate(text, voice_name, **tts_kwargs)
                     loop.run_until_complete(communicate.save(output_path))
                     loop.close()
                     
@@ -192,7 +196,11 @@ class TTSGenerator:
             asyncio.set_event_loop(loop)
             
             import edge_tts
-            communicate = edge_tts.Communicate(text, voice_name)
+            # 转换options参数
+            tts_kwargs = {}
+            if options:
+                tts_kwargs = self._convert_options_to_edge_tts(options)
+            communicate = edge_tts.Communicate(text, voice_name, **tts_kwargs)
             loop.run_until_complete(communicate.save(output_path))
             loop.close()
             
@@ -207,6 +215,7 @@ class TTSGenerator:
         self,
         text: str,
         voice_name: str,
+        options: Optional[TTSOptions] = None,
         output_path: Optional[str] = None
     ) -> str:
         """
@@ -215,6 +224,7 @@ class TTSGenerator:
         Args:
             text: 要转换的文本
             voice_name: edge-tts语音名称
+            options: TTS选项
             output_path: 输出文件路径
             
         Returns:
@@ -239,7 +249,11 @@ class TTSGenerator:
             asyncio.set_event_loop(loop)
             
             import edge_tts
-            communicate = edge_tts.Communicate(text, voice_name)
+            # 转换options参数
+            tts_kwargs = {}
+            if options:
+                tts_kwargs = self._convert_options_to_edge_tts(options)
+            communicate = edge_tts.Communicate(text, voice_name, **tts_kwargs)
             loop.run_until_complete(communicate.save(output_path))
             loop.close()
             
@@ -250,13 +264,20 @@ class TTSGenerator:
             logger.error(f"同步语音生成失败: {e}")
             raise RuntimeError(f"同步语音生成失败: {e}") from e
     
-    async def generate_async(self, text: str, voice_name: str, output_path: Optional[str] = None) -> str:
+    async def generate_async(
+        self,
+        text: str,
+        voice_name: str,
+        options: Optional[TTSOptions] = None,
+        output_path: Optional[str] = None
+    ) -> str:
         """
         异步生成语音
         
         Args:
             text: 要转换的文本
             voice_name: edge-tts语音名称
+            options: TTS选项
             output_path: 输出文件路径，如果为None则使用临时文件
             
         Returns:
@@ -278,7 +299,11 @@ class TTSGenerator:
         
         try:
             import edge_tts
-            communicate = edge_tts.Communicate(text, voice_name)
+            # 转换options参数
+            tts_kwargs = {}
+            if options:
+                tts_kwargs = self._convert_options_to_edge_tts(options)
+            communicate = edge_tts.Communicate(text, voice_name, **tts_kwargs)
             await communicate.save(output_path)
             
             logger.info(f"异步语音生成成功: {output_path}")
@@ -288,13 +313,19 @@ class TTSGenerator:
             logger.error(f"异步语音生成失败: {e}")
             raise RuntimeError(f"异步语音生成失败: {e}") from e
     
-    async def generate_to_bytes(self, text: str, voice_name: str) -> bytes:
+    async def generate_to_bytes(
+        self,
+        text: str,
+        voice_name: str,
+        options: Optional[TTSOptions] = None
+    ) -> bytes:
         """
         异步生成语音到内存
         
         Args:
             text: 要转换的文本
             voice_name: edge-tts语音名称
+            options: TTS选项
             
         Returns:
             音频数据(bytes)
@@ -310,7 +341,11 @@ class TTSGenerator:
         
         try:
             import edge_tts
-            communicate = edge_tts.Communicate(text, voice_name)
+            # 转换options参数
+            tts_kwargs = {}
+            if options:
+                tts_kwargs = self._convert_options_to_edge_tts(options)
+            communicate = edge_tts.Communicate(text, voice_name, **tts_kwargs)
             
             audio_data = bytearray()
             async for chunk in communicate.stream():
