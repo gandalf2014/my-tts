@@ -65,6 +65,53 @@ class TTSGenerator:
         self._current_voice_name: Optional[str] = None
         logger.info("TTSGenerator 初始化完成")
     
+    @staticmethod
+    def _convert_options_to_edge_tts(options: TTSOptions) -> dict:
+        """
+        将TTSOptions转换为edge-tts接受的参数格式
+        
+        转换规则:
+        - speed (0.5-2.0) → rate ('-50%' to '+100%')
+        - pitch (0.5-2.0) → pitch ('-50Hz' to '+100Hz')
+        - volume (0-100) → volume ('-100%' to '+0%')
+        
+        Args:
+            options: TTS选项对象
+            
+        Returns:
+            包含rate, pitch, volume字符串的字典
+            
+        Raises:
+            ValueError: 参数超出有效范围
+        """
+        # 验证并转换语速
+        if not 0.5 <= options.speed <= 2.0:
+            raise ValueError(f"语速 {options.speed} 超出有效范围 [0.5, 2.0]")
+        rate_percent = (options.speed - 1.0) * 100
+        rate = f"{'+' if rate_percent >= 0 else ''}{int(rate_percent)}%"
+        
+        # 验证并转换音调
+        if not 0.5 <= options.pitch <= 2.0:
+            raise ValueError(f"音调 {options.pitch} 超出有效范围 [0.5, 2.0]")
+        pitch_hz = (options.pitch - 1.0) * 100
+        pitch = f"{'+' if pitch_hz >= 0 else ''}{int(pitch_hz)}Hz"
+        
+        # 验证并转换音量
+        if not 0 <= options.volume <= 100:
+            raise ValueError(f"音量 {options.volume} 超出有效范围 [0, 100]")
+        volume_percent = options.volume - 100
+        volume = f"{'+' if volume_percent >= 0 else ''}{int(volume_percent)}%"
+        
+        logger.debug(f"参数转换: speed={options.speed}→rate={rate}, "
+                    f"pitch={options.pitch}→pitch={pitch}, "
+                    f"volume={options.volume}→volume={volume}")
+        
+        return {
+            'rate': rate,
+            'pitch': pitch,
+            'volume': volume
+        }
+    
     def generate(
         self,
         text: str,
