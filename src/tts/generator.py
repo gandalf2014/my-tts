@@ -94,23 +94,32 @@ class TTSGenerator:
         if not 0.5 <= options.pitch <= 2.0:
             raise ValueError(f"音调 {options.pitch} 超出有效范围 [0.5, 2.0]")
         pitch_hz = (options.pitch - 1.0) * 100
-        pitch = f"{'+' if pitch_hz >= 0 else ''}{int(pitch_hz)}Hz"
+        # edge-tts 不接受 '0Hz' 或 '+0Hz'，只有非零值才传递
+        if pitch_hz == 0:
+            pitch = None
+        else:
+            pitch = f"{'+' if pitch_hz >= 0 else ''}{int(pitch_hz)}Hz"
         
         # 验证并转换音量
         if not 0 <= options.volume <= 100:
             raise ValueError(f"音量 {options.volume} 超出有效范围 [0, 100]")
         volume_percent = options.volume - 100
-        volume = f"{'+' if volume_percent >= 0 else ''}{int(volume_percent)}%"
+        # edge-tts 不接受 '0%' 或 '+0%'，只有非零值才传递
+        if volume_percent == 0:
+            volume = None
+        else:
+            volume = f"{'+' if volume_percent >= 0 else ''}{int(volume_percent)}%"
         
         logger.debug(f"参数转换: speed={options.speed}→rate={rate}, "
                     f"pitch={options.pitch}→pitch={pitch}, "
                     f"volume={options.volume}→volume={volume}")
         
-        return {
-            'rate': rate,
-            'pitch': pitch,
-            'volume': volume
-        }
+        result = {'rate': rate}
+        if pitch is not None:
+            result['pitch'] = pitch
+        if volume is not None:
+            result['volume'] = volume
+        return result
     
     def generate(
         self,
